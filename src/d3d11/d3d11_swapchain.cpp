@@ -1099,8 +1099,10 @@ CreateSwapChain(
   DWORD window_process_id;
   GetWindowThreadProcessId(hWnd, &window_process_id);
   if (GetProcessId(GetCurrentProcess()) != window_process_id) {
-    ERR("CreateSwapChain: cross-process swapchain not supported yet");
-    return E_FAIL;
+    // The window belongs to another process (e.g. Chromium's GPU process drawing into
+    // the browser's window). Wine presents this through a remote layer; if it can't,
+    // CreateMetalViewFromHWND below returns no view.
+    WARN("CreateSwapChain: cross-process swapchain for window ", (void *)hWnd);
   }
 
   Com<IMTLDXGIDevice> layer_factory;
