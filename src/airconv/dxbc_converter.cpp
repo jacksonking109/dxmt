@@ -427,6 +427,29 @@ llvm::Error convert_dxbc_pixel_shader(
     pso_unorm_output_reg_mask = pso_data->unorm_output_reg_mask;
     pso_sample_mask = pso_data->sample_mask;
   }
+  /* SM50_SHADER_PSO_VERTEX_INTERFACE: the linked vertex stage's outputs. An
+   * unreadable container (DXIL has no OSGN/OSG5 chunk) disables the filtering
+   * rather than failing: the pixel shader is still correct on its own. */
+  std::optional<std::vector<Signature>> vertex_outputs;
+  SM50_SHADER_PSO_VERTEX_INTERFACE_DATA *vertex_interface = nullptr;
+  if (args_get_data<SM50_SHADER_PSO_VERTEX_INTERFACE, SM50_SHADER_PSO_VERTEX_INTERFACE_DATA>(
+        pArgs, &vertex_interface
+      ) &&
+      vertex_interface->vertex_bytecode && vertex_interface->vertex_bytecode_size) {
+    CDXBCParser container;
+    CSignatureParser5 vs_output;
+    if (SUCCEEDED(container.ReadDXBC(
+          vertex_interface->vertex_bytecode, vertex_interface->vertex_bytecode_size
+        )) &&
+        SUCCEEDED(DXBCGetOutputSignature(vertex_interface->vertex_bytecode, &vs_output))) {
+      const D3D11_SIGNATURE_PARAMETER *parameters;
+      auto rast = vs_output.RastSignature();
+      rast->GetParameters(&parameters);
+      vertex_outputs.emplace();
+      for (unsigned i = 0; i < rast->GetNumParameters(); i++)
+        vertex_outputs->push_back(Signature(parameters[i]));
+    }
+  }
   SM50_SHADER_METAL_VERSION metal_version = SM50_SHADER_METAL_310;
   SM50_SHADER_FLAG shader_flags = {};
   SM50_SHADER_COMMON_DATA *sm50_common = nullptr;
@@ -453,6 +476,7 @@ llvm::Error convert_dxbc_pixel_shader(
     sig_ctx.disable_depth_output = pso_disable_depth_output;
     sig_ctx.pull_mode_reg_mask = shader_info->pull_mode_reg_mask;
     sig_ctx.unorm_output_reg_mask = pso_unorm_output_reg_mask;
+    sig_ctx.vertex_outputs = vertex_outputs ? &*vertex_outputs : nullptr;
     for (auto &p : pShaderInternal->signature_handlers) {
       p(sig_ctx);
     }

@@ -7,6 +7,47 @@ using namespace dxmt::shader::common;
 
 namespace dxmt::dxbc {
 
+/*
+ * SM50_SHADER_PSO_VERTEX_INTERFACE: link one pixel shader user input against
+ * the output signature of the vertex stage. Attributes are named after the
+ * register and first component they occupy (Signature::consistentAttributeName),
+ * and the vertex function outputs each non-system-value output element as the
+ * WHOLE register under that name, so an input can read another register's
+ * attribute as long as its components sit in the same positions.
+ *
+ * Returns false when the vertex stage provides nothing for the input (it must
+ * then not be declared: Metal rejects a pipeline whose fragment function reads
+ * a `user(...)` the vertex function does not write). `name` is updated when the
+ * input is linked to a differently placed output with the same semantic.
+ */
+static bool
+link_ps_input(
+  const std::vector<Signature> &vertex_outputs, const Signature &input,
+  uint32_t dcl_mask, std::string &name
+) {
+  // a declaration spanning several signature elements: leave it alone
+  if (dcl_mask & ~input.mask())
+    return true;
+  for (auto &out : vertex_outputs) {
+    if (out.isSystemValue())
+      continue;
+    if (out.semanticName() != input.semanticName() ||
+        out.semanticIndex() != input.semanticIndex())
+      continue;
+    if ((dcl_mask & ~out.mask()) == 0) {
+      name = out.consistentAttributeName();
+      return true;
+    }
+    break; // same semantic, other components: not representable as a rename
+  }
+  // no semantic match: what register-based linking would have used, if present
+  for (auto &out : vertex_outputs) {
+    if (!out.isSystemValue() && out.consistentAttributeName() == name)
+      return true;
+  }
+  return false;
+}
+
 inline air::Interpolation
 to_air_interpolation(microsoft::D3D10_SB_INTERPOLATION_MODE mode) {
   using namespace microsoft;
@@ -420,8 +461,19 @@ void handle_signature_ps(
     });
     max_input_register = std::max(reg + 1, max_input_register);
     if (sig.mask() == 0) break;
-    signature_handlers.push_back([=, type = sig.componentType(), name = sig.consistentAttributeName()]
+    signature_handlers.push_back([=, type = sig.componentType(), sig_name = sig.consistentAttributeName()]
     (SignatureContext &ctx) {
+      std::string name = sig_name;
+      if (ctx.vertex_outputs && !link_ps_input(*ctx.vertex_outputs, sig, mask, name)) {
+        // not written by the vertex stage: undefined in D3D, zero here
+        ctx.prologue << make_effect_bind([=](struct context ctx) {
+          return store_at_vec4_array_masked(
+            ctx.resource.input.ptr_int4, ctx.builder.getInt32(reg),
+            llvm::Constant::getNullValue(ctx.types._int4), mask
+          );
+        });
+        return;
+      }
       bool pull_mode = bool(ctx.pull_mode_reg_mask & (1 << reg)) && interpolation != air::Interpolation::flat;
       auto assigned_index = ctx.func_signature.DefineInput(InputFragmentStageIn{
         .user = name, .type = to_msl_type(type), .interpolation = interpolation, .pull_mode = pull_mode

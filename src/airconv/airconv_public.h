@@ -236,6 +236,7 @@ enum SM50_SHADER_COMPILATION_ARGUMENT_TYPE {
   SM50_SHADER_GS_PASS_THROUGH = 5,
   SM50_SHADER_PSO_GEOMETRY_SHADER = 6,
   SM50_SHADER_PSO_TESSELLATOR = 7,
+  SM50_SHADER_PSO_VERTEX_INTERFACE = 8,
   SM50_SHADER_ARGUMENT_TYPE_MAX = 0xffffffff,
 };
 
@@ -335,6 +336,29 @@ struct SM50_SHADER_PSO_TESSELLATOR_DATA {
   void *next;
   enum SM50_SHADER_COMPILATION_ARGUMENT_TYPE type;
   uint32_t max_potential_tess_factor;
+};
+
+/**
+ * Pixel shader only: the vertex-processing stage this pixel shader will be
+ * linked with in a pipeline. D3D links stage interfaces by semantic, and an
+ * input the previous stage does not write is merely undefined; Metal links by
+ * `user(...)` name and rejects the whole pipeline for a fragment input the
+ * vertex function does not output. Given the vertex shader's DXBC container,
+ * each user input of the pixel shader is
+ *   - linked to the vertex output with the same semantic name and index, when
+ *     that output covers the input's components in the same positions (the
+ *     attribute is then named after the vertex shader's register);
+ *   - otherwise left as it was, when the vertex shader outputs an attribute of
+ *     the same name (the register-based linking used without this argument);
+ *   - otherwise not declared at all, its register reading as zero.
+ * A container without a readable output signature (e.g. DXIL) disables the
+ * filtering instead of failing the compilation.
+ */
+struct SM50_SHADER_PSO_VERTEX_INTERFACE_DATA {
+  void *next;
+  enum SM50_SHADER_COMPILATION_ARGUMENT_TYPE type;
+  const void *vertex_bytecode;
+  uint32_t vertex_bytecode_size;
 };
 
 AIRCONV_API int SM50Initialize(

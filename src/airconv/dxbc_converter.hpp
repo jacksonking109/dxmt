@@ -324,6 +324,8 @@ struct PatchConstantScalarInfo {
   int8_t tess_factor_index;
 };
 
+class Signature;
+
 struct SignatureContext {
   IREffect &prologue;
   IRValue &epilogue;
@@ -335,6 +337,9 @@ struct SignatureContext {
   bool skip_vertex_output;
   uint32_t pull_mode_reg_mask;
   uint32_t unorm_output_reg_mask;
+  /* pixel shader: the output signature of the vertex stage it is linked with
+   * (SM50_SHADER_PSO_VERTEX_INTERFACE), or null to link inputs by register */
+  const std::vector<Signature> *vertex_outputs = nullptr;
 
   SignatureContext(
     IREffect &prologue, IRValue &epilogue, air::FunctionSignatureBuilder &func_signature, io_binding_map &resource
