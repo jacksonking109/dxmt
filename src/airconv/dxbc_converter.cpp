@@ -1377,6 +1377,79 @@ AIRCONV_API void SM50GetArgumentsInfo(
     );
 }
 
+/*
+ * SM50GetRangeInfo: the declaration ranges a D3D12 runtime resolves against its
+ * root signature.
+ *
+ * Nothing here is new information; it joins two things SM50Initialize already
+ * computed: the ResourceRange recorded per declaration (dcl_* parsing in
+ * dxbc_converter_cfg.cpp) and the table position the binding tables assigned
+ * to it (arg_index above).
+ *
+ * StructurePtrOffset is arg_index unchanged. ArgumentBufferBuilder returns the
+ * ELEMENT index of the field it appended, and every field it can hold (buffer
+ * pointer, texture id, sampler id, 64-bit integer) is 8 bytes, so the element
+ * index is the 64-bit-word index into the table -- the same unit as
+ * ArgumentTableQwords (= binding_table.Size()). A runtime writing the tables
+ * with plain stores (e.g. `uint64_t *tab; tab[StructurePtrOffset + k] = ...`)
+ * therefore needs no layout knowledge beyond the per-type entry order, which
+ * is fixed by the Define* call order in SM50Initialize:
+ *   cb:  cb#                  (1 word, constant-buffer table)
+ *   s:   s#, cube_s#, meta_s# (3 words)
+ *   t:   t#, meta_t#          (2 words)
+ *   u:   u#, meta_u#, [counter#] (2 words, 3 with UAV_COUNTER)
+ *
+ * Flags are copied from args_reflection(_cbuffer) -- the same record
+ * SM50GetArgumentsInfo returns -- rather than recomputed, so the two APIs can
+ * never disagree. The runtime picks the entry encoding from them: BUFFER means
+ * [+0] is a gpu address and [+1] the byte length, TEXTURE means [+0] is a
+ * texture id and [+1] its metadata, UAV_COUNTER means [+2] holds the counter's
+ * address.
+ */
+AIRCONV_API uint32_t SM50GetRangeInfo(
+  sm50_shader_t pShader, struct MTL_SM50_RANGE_INFO *pRanges, uint32_t MaxRanges
+) {
+  auto sm50_shader = (dxmt::dxbc::SM50ShaderInternal *)pShader;
+  auto &info = sm50_shader->shader_info;
+  uint32_t count = 0;
+
+  auto flags_of = [&](SM50BindingType type, uint32_t range_id) {
+    auto &list = type == SM50BindingType::ConstantBuffer
+                   ? sm50_shader->args_reflection_cbuffer
+                   : sm50_shader->args_reflection;
+    for (auto &arg : list)
+      if (arg.Type == type && arg.SM50BindingSlot == range_id)
+        return arg.Flags;
+    return (MTL_SM50_SHADER_ARGUMENT_FLAG)0;
+  };
+  auto emit = [&](SM50BindingType type, const dxmt::dxbc::ResourceRange &range,
+                  uint32_t arg_index, bool cb_table) {
+    if (pRanges && count < MaxRanges) {
+      pRanges[count] = {
+        .Type = type,
+        .RangeID = range.range_id,
+        .RegisterSpace = range.space,
+        .LowerBound = range.lower_bound,
+        .RangeSize = range.size,
+        .StructurePtrOffset = arg_index,
+        .Flags = flags_of(type, range.range_id),
+        .IsConstantBufferTable = cb_table ? 1u : 0u,
+      };
+    }
+    count++;
+  };
+
+  for (auto &[range_id, cbv] : info.cbufferMap)
+    emit(SM50BindingType::ConstantBuffer, cbv.range, cbv.arg_index, true);
+  for (auto &[range_id, sampler] : info.samplerMap)
+    emit(SM50BindingType::Sampler, sampler.range, sampler.arg_index, false);
+  for (auto &[range_id, srv] : info.srvMap)
+    emit(SM50BindingType::SRV, srv.range, srv.arg_index, false);
+  for (auto &[range_id, uav] : info.uavMap)
+    emit(SM50BindingType::UAV, uav.range, uav.arg_index, false);
+  return count;
+}
+
 AIRCONV_API void SM50Destroy(sm50_shader_t pShader) {
   delete (dxmt::dxbc::SM50ShaderInternal *)pShader;
 }

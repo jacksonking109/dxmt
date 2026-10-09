@@ -61,6 +61,50 @@ struct MTL_SM50_SHADER_ARGUMENT {
   uint32_t StructurePtrOffset;
 };
 
+/**
+ * One resource declaration of a shader, as a D3D12 runtime needs it to resolve
+ * the declaration against a root signature and write the descriptor into the
+ * shader's tables (see SM50GetRangeInfo).
+ */
+struct MTL_SM50_RANGE_INFO {
+  /* ConstantBuffer (0, b#), Sampler (1, s#), SRV (2, t#), UAV (3, u#) */
+  SM50BindingType Type;
+  /**
+  the declaration handle, i.e. the first operand index of the dcl_* instruction.
+  SM 5.0: equal to the register (cb3 -> 3). SM 5.1: an arbitrary id (CB0[17:17]
+  has RangeID 0 and LowerBound 17); it is also the SM50BindingSlot that
+  SM50GetArgumentsInfo reports for the same resource.
+  */
+  uint32_t RangeID;
+  uint32_t RegisterSpace;
+  /* the first D3D register of the range: 17 for b17 */
+  uint32_t LowerBound;
+  /* number of registers in the range; 1 for SM 5.0, ~0u for an unbounded range */
+  uint32_t RangeSize;
+  /**
+  index of the resource's FIRST entry in its table, counted in 64-bit words
+  (every entry of both tables is one 8-byte value: a gpu address, a texture or
+  sampler resource id, or a 64-bit integer). Byte offset = StructurePtrOffset * 8.
+  The entries that follow it are fixed by Type and Flags:
+    constant buffer: [+0] gpu address                     (constant-buffer table)
+    sampler:         [+0] sampler id, [+1] cube sampler id, [+2] LOD bias metadata
+    SRV / UAV:       [+0] gpu address (BUFFER) or texture id (TEXTURE),
+                     [+1] metadata (byte length; or min-LOD clamp and array length;
+                          or element count and first element for TBUFFER_OFFSET),
+                     [+2] UAV counter address (UAV with UAV_COUNTER only)
+  */
+  uint32_t StructurePtrOffset;
+  /* exactly the flags SM50GetArgumentsInfo reports for this resource */
+  enum MTL_SM50_SHADER_ARGUMENT_FLAG Flags;
+  /**
+  1: the entry is in the constant-buffer table (bound at
+  ConstanttBufferTableBindIndex); 0: in the argument table (bound at
+  ArgumentBufferBindIndex, ArgumentTableQwords words long). Every constant
+  buffer, and nothing else, lives in the constant-buffer table.
+  */
+  uint32_t IsConstantBufferTable;
+};
+
 enum MTL_TESSELLATOR_OUTPUT_PRIMITIVE {
   MTL_TESSELLATOR_OUTPUT_POINT = 1,
   MTL_TESSELLATOR_OUTPUT_LINE = 2,
@@ -259,6 +303,9 @@ enum SM50_INDEX_BUFFER_FORMAT {
   SM50_INDEX_BUFFER_FORMAT_UINT32 = 2,
 };
 
+/* compatibility spelling used by D3D12 runtimes written against an earlier header */
+#define SM50_INDEX_BUFFER_FORAMT SM50_INDEX_BUFFER_FORMAT
+
 struct SM50_SHADER_IA_INPUT_LAYOUT_DATA {
   void *next;
   enum SM50_SHADER_COMPILATION_ARGUMENT_TYPE type;
@@ -331,6 +378,17 @@ AIRCONV_API int SM50CompileGeometryPipelineGeometry(
 AIRCONV_API void SM50GetArgumentsInfo(
   sm50_shader_t pShader, struct MTL_SM50_SHADER_ARGUMENT *pConstantBuffers,
   struct MTL_SM50_SHADER_ARGUMENT *pArguments
+);
+
+/**
+ * Every resource declaration of the shader (constant buffers, then samplers,
+ * SRVs and UAVs, each in RangeID order), joined with where its descriptor goes
+ * in the shader's tables. Writes at most `MaxRanges` records to `pRanges` (which
+ * may be NULL when MaxRanges is 0) and returns the total number the shader has,
+ * so a return value > MaxRanges means the output was truncated.
+ */
+AIRCONV_API uint32_t SM50GetRangeInfo(
+  sm50_shader_t pShader, struct MTL_SM50_RANGE_INFO *pRanges, uint32_t MaxRanges
 );
 
 #ifdef __cplusplus
