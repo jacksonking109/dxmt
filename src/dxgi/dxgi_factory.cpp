@@ -13,7 +13,7 @@ namespace dxmt {
 Com<IMTLDXGIAdapter> CreateAdapter(WMT::Device Device,
                                    IDXGIFactory2 *pFactory, Config &config);
 
-class MTLDXGIFactory : public MTLDXGIObject<IDXGIFactory6> {
+class MTLDXGIFactory : public MTLDXGIObject<IDXGIFactory7> {
 
 public:
   MTLDXGIFactory(UINT Flags) : flags_(Flags) {};
@@ -29,7 +29,8 @@ public:
         riid == __uuidof(IDXGIFactory) || riid == __uuidof(IDXGIFactory1) ||
         riid == __uuidof(IDXGIFactory2) || riid == __uuidof(IDXGIFactory2) ||
         riid == __uuidof(IDXGIFactory3) || riid == __uuidof(IDXGIFactory4) ||
-        riid == __uuidof(IDXGIFactory5) || riid == __uuidof(IDXGIFactory6)) {
+        riid == __uuidof(IDXGIFactory5) || riid == __uuidof(IDXGIFactory6) ||
+        riid == __uuidof(IDXGIFactory7)) {
       *ppvObject = ref(this);
       return S_OK;
     }
@@ -301,8 +302,23 @@ public:
     return adapter->QueryInterface(riid, ppvAdapter);
   };
 
+  // Adapters never change here (one GPU), so the event is never signalled.
+  HRESULT STDMETHODCALLTYPE
+  RegisterAdaptersChangedEvent(HANDLE hEvent, DWORD *pdwCookie) override {
+    if (!hEvent || !pdwCookie)
+      return DXGI_ERROR_INVALID_CALL;
+    *pdwCookie = ++adapters_changed_cookie_;
+    return S_OK;
+  }
+
+  HRESULT STDMETHODCALLTYPE
+  UnregisterAdaptersChangedEvent(DWORD dwCookie) override {
+    return S_OK;
+  }
+
 private:
   UINT flags_;
+  DWORD adapters_changed_cookie_ = 0;
 
   HWND associated_window_ = nullptr;
 };
