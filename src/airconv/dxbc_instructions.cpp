@@ -319,7 +319,15 @@ SrcOperand readSrcOperand(
         .regindex = readOperandIndex(O.m_Index[1], O.m_IndexType[1], phase),
       };
     }
-    assert(0 && "TODO: SM5.1");
+    // SM 5.1: [range id][register in the range][element]
+    DXASSERT_DXBC(O.m_IndexDimension == D3D10_SB_OPERAND_INDEX_3D);
+    DXASSERT_DXBC(O.m_IndexType[0] == D3D10_SB_OPERAND_INDEX_IMMEDIATE32);
+    return SrcOperandConstantBuffer{
+      ._ = readSrcOperandCommon(O, read_type),
+      .rangeid = O.m_Index[0].m_RegIndex,
+      .rangeindex = readOperandIndex(O.m_Index[1], O.m_IndexType[1], phase),
+      .regindex = readOperandIndex(O.m_Index[2], O.m_IndexType[2], phase),
+    };
   }
   case D3D10_SB_OPERAND_TYPE_IMMEDIATE_CONSTANT_BUFFER: {
     DXASSERT_DXBC(O.m_IndexDimension == D3D10_SB_OPERAND_INDEX_1D);
